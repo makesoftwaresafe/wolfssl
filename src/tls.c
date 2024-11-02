@@ -3649,7 +3649,7 @@ int TLSX_CSR_InitRequest_ex(TLSX* extensions, DecodedCert* cert,
 
                 request = &csr->request.ocsp[req_cnt];
                 if (request->serial != NULL) {
-                    /* clear request contents before re-use */
+                    /* clear request contents before reuse */
                     FreeOcspRequest(request);
                     if (csr->requests > 0)
                         csr->requests--;
@@ -6450,7 +6450,7 @@ static int TLSX_SupportedVersions_GetSize(void* data, byte msgType, word16* pSz)
         if (versionIsLessEqual(isDtls, ssl->options.minDowngrade, tls13Minor)
         #if defined(OPENSSL_EXTRA) || defined(HAVE_WEBSERVER) || \
             defined(WOLFSSL_WPAS_SMALL)
-            && (ssl->options.mask & SSL_OP_NO_TLSv1_3) == 0
+            && (ssl->options.mask & WOLFSSL_OP_NO_TLSv1_3) == 0
         #endif
         ) {
             cnt++;
@@ -6462,7 +6462,7 @@ static int TLSX_SupportedVersions_GetSize(void* data, byte msgType, word16* pSz)
                     isDtls, ssl->options.minDowngrade, tls12Minor)
 #if defined(OPENSSL_EXTRA) || defined(HAVE_WEBSERVER) ||                       \
     defined(WOLFSSL_WPAS_SMALL)
-                && (ssl->options.mask & SSL_OP_NO_TLSv1_2) == 0
+                && (ssl->options.mask & WOLFSSL_OP_NO_TLSv1_2) == 0
 #endif
             ) {
                 cnt++;
@@ -6473,7 +6473,7 @@ static int TLSX_SupportedVersions_GetSize(void* data, byte msgType, word16* pSz)
                     isDtls, ssl->options.minDowngrade, tls11Minor)
             #if defined(OPENSSL_EXTRA) || defined(HAVE_WEBSERVER) || \
                 defined(WOLFSSL_WPAS_SMALL)
-                && (ssl->options.mask & SSL_OP_NO_TLSv1_1) == 0
+                && (ssl->options.mask & WOLFSSL_OP_NO_TLSv1_1) == 0
             #endif
             ) {
                 cnt++;
@@ -6482,7 +6482,7 @@ static int TLSX_SupportedVersions_GetSize(void* data, byte msgType, word16* pSz)
             if (!ssl->options.dtls && (ssl->options.minDowngrade <= TLSv1_MINOR)
             #if defined(OPENSSL_EXTRA) || defined(HAVE_WEBSERVER) || \
                 defined(WOLFSSL_WPAS_SMALL)
-                && (ssl->options.mask & SSL_OP_NO_TLSv1) == 0
+                && (ssl->options.mask & WOLFSSL_OP_NO_TLSv1) == 0
             #endif
             ) {
                 cnt++;
@@ -6547,7 +6547,7 @@ static int TLSX_SupportedVersions_Write(void* data, byte* output,
         if (versionIsLessEqual(isDtls, ssl->options.minDowngrade, tls13minor)
 #if defined(OPENSSL_EXTRA) || defined(HAVE_WEBSERVER) ||                       \
     defined(WOLFSSL_WPAS_SMALL)
-            && (ssl->options.mask & SSL_OP_NO_TLSv1_3) == 0
+            && (ssl->options.mask & WOLFSSL_OP_NO_TLSv1_3) == 0
 #endif
         ) {
             *cnt += OPAQUE16_LEN;
@@ -6567,7 +6567,7 @@ static int TLSX_SupportedVersions_Write(void* data, byte* output,
             if (versionIsLessEqual(isDtls, ssl->options.minDowngrade, tls12minor)
 #if defined(OPENSSL_EXTRA) || defined(HAVE_WEBSERVER) || \
                 defined(WOLFSSL_WPAS_SMALL)
-                && (ssl->options.mask & SSL_OP_NO_TLSv1_2) == 0
+                && (ssl->options.mask & WOLFSSL_OP_NO_TLSv1_2) == 0
             #endif
             ) {
                 *cnt += OPAQUE16_LEN;
@@ -6580,7 +6580,7 @@ static int TLSX_SupportedVersions_Write(void* data, byte* output,
             if (versionIsLessEqual(isDtls, ssl->options.minDowngrade, tls11minor)
             #if defined(OPENSSL_EXTRA) || defined(HAVE_WEBSERVER) || \
                 defined(WOLFSSL_WPAS_SMALL)
-                && (ssl->options.mask & SSL_OP_NO_TLSv1_1) == 0
+                && (ssl->options.mask & WOLFSSL_OP_NO_TLSv1_1) == 0
             #endif
             ) {
                 *cnt += OPAQUE16_LEN;
@@ -6591,7 +6591,7 @@ static int TLSX_SupportedVersions_Write(void* data, byte* output,
             if (!ssl->options.dtls && (ssl->options.minDowngrade <= TLSv1_MINOR)
             #if defined(OPENSSL_EXTRA) || defined(HAVE_WEBSERVER) || \
                 defined(WOLFSSL_WPAS_SMALL)
-                && (ssl->options.mask & SSL_OP_NO_TLSv1) == 0
+                && (ssl->options.mask & WOLFSSL_OP_NO_TLSv1) == 0
             #endif
             ) {
                 *cnt += OPAQUE16_LEN;
@@ -9955,6 +9955,16 @@ int TLSX_CKS_Parse(WOLFSSL* ssl, byte* input, word16 length,
                 /* All other values (including external) are not. */
                 return BAD_FUNC_ARG;
         }
+    }
+
+    /* This could be a situation where the client tried to start with TLS 1.3
+     * when it sent ClientHello and the server down-graded to TLS 1.2. In that
+     * case, erroring out because it is TLS 1.2 is not a reasonable thing to do.
+     * In the case of TLS 1.2, the CKS values will be ignored. */
+    if (!IsAtLeastTLSv1_3(ssl->version)) {
+        ssl->sigSpec = NULL;
+        ssl->sigSpecSz = 0;
+        return 0;
     }
 
     /* Extension data is valid, but if we are the server and we don't have an
@@ -15038,9 +15048,8 @@ int TLSX_Parse(WOLFSSL* ssl, const byte* input, word16 length, byte msgType,
 #ifdef WOLFSSL_DUAL_ALG_CERTS
             case TLSX_CKS:
                 WOLFSSL_MSG("CKS extension received");
-                if (!IsAtLeastTLSv1_3(ssl->version) ||
-                    (msgType != client_hello &&
-                     msgType != encrypted_extensions)) {
+                if (msgType != client_hello &&
+                     msgType != encrypted_extensions) {
                         WOLFSSL_ERROR_VERBOSE(EXT_NOT_ALLOWED);
                         return EXT_NOT_ALLOWED;
                 }
